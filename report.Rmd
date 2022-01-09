@@ -1,0 +1,123 @@
+---
+title: "Differential Expression of Cancer Dataset"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+defaultW <- getOption("warn") 
+
+options(warn = -1) 
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+```{r message=FALSE }
+# import needed libs
+# setwd("/home/ata/Desktop/interview")
+library(DESeq2)
+library(tidyverse)
+library(ggplot2)
+library(pheatmap)
+
+#load count matrix
+expressions <- read.table("expression_counts.txt",
+                         header=TRUE, row.names=1)
+#change row and col to match DSEQ
+exp_transpose = t(expressions)
+#write.csv(exp_transpose, "exp_transposed.csv")
+
+
+
+#create annotation file for DESEQ
+name <- row.names(expressions)
+condition <- c("disease", "disease", "disease", 'control', 'control', 'control')
+annot <- data.frame(name, condition)
+options(warn = defaultW)
+
+```
+
+Now that we have preproccessed the data, we can make a DESeq dataset, and the run the model after removing lowly expressed genes.
+
+```{r results='hide', message=FALSE, warning=FALSE}
+#create DESeqdataset
+dds <- DESeqDataSetFromMatrix(countData = exp_transpose,
+                              colData = annot,
+                              design = ~condition)
+#remove lowly expressed genes
+keep <- rowSums(counts(dds)) >= 10
+high_dds <- dds[keep, ]
+
+#run DESeq
+ddsDE <- DESeq(high_dds)
+
+```
+
+We can check the results now, at alpha = 0.05
+
+```{r}
+# results
+res <- results(ddsDE, alpha = 0.05) #adjusted p-val
+res_ordered <- res[order(res$padj), ]
+res$sig <- ifelse(res$padj <= 0.05, "yes", "no")
+#write.csv(res, "results.csv")
+summary(res)
+
+# reread res as a dataframe
+deSeqRes <- read.csv("results.csv", row.names = 1)
+deSeqRes$sig <- ifelse(deSeqRes$padj <= 0.05, "yes", "no")
+```
+By checking the summary of res, we find that we have 38 genes that are up regulated and 35 which are down regulated. To further explore the data, we plot some explanatory graphs.
+## Including Plots
+
+
+
+```{r plotMA, echo=FALSE}
+plotMA(ddsDE, ylim = c(-6, 6))
+
+```
+```{r Volcano plot, echo=FALSE}
+ggplot(deSeqRes, aes(x=log2FoldChange, y = -log10(padj), color=sig)) + geom_point()
+
+```
+```{r}
+# select significant genes
+significants <- subset(deSeqRes, padj <= 0.05)
+
+# select up and down regulated ones
+up_regulated <- row.names(subset(significants, log2FoldChange > 0))
+down_regulated <- row.names(subset(significants, log2FoldChange < 0))
+
+# load cosmic data
+cosmic_data <-read.csv("Census_allSat_Jan81918072022.csv", )
+genes_in_cosmic <- cosmic_data$Gene.Symbol
+
+
+# intersect my significant genes with cosmic data
+up_intersect = intersect(up_regulated, genes_in_cosmic)
+down_intersect = intersect(down_regulated, genes_in_cosmic)
+
+up_intersect
+down_intersect
+```
+It is expected that the genes that are up regulated be oncogenes and the genes that are down regulated be TSG. We check this with the cancer census data.
+```{r check census data}
+cd <- as_tibble(cosmic_data)
+uprg <- cd %>% filter(
+   
+  Gene.Symbol %in% up_intersect
+  )
+
+drg <- cd %>% filter(
+   
+  Gene.Symbol %in% down_intersect
+  )
+drg %>%
+     select(c('Gene.Symbol', 'Role.in.Cancer'))
+uprg %>%
+     select(c('Gene.Symbol', 'Role.in.Cancer'))
+
+```
+From the above two outputs, we see that only FBXW7 has a different role than that of anticipated. While other follow what we thought, where the ones that are up regulated are Oncogenes and the ones that are Down regulated are TSG.
+
